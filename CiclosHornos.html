@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#121212">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Registro de Temperaturas</title>
+
+<!-- Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- Firebase compat (v9 compat) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<style>
+  :root{
+    --bg:#121212; --panel:#1e1e1e; --accent:#00e5ff; --accent-2:#ffae00; --muted:#9aa9b1;
+    --input-bg:#fff; --input-color:#000;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);font-family:Arial,Helvetica,sans-serif;color:#fff}
+  .wrap{max-width:1120px;margin:12px auto;padding:12px}
+  h2{color:var(--accent);text-align:center;margin:8px 0 16px}
+  .card{background:var(--panel);border-radius:10px;padding:14px;margin-bottom:14px;border:1px solid #222}
+  label{display:block;margin:6px 0 4px;font-weight:700;color:#ddd}
+  input, select, textarea, button{box-sizing:border-box;border-radius:6px;border:1px solid #333;padding:8px}
+  input,select,textarea{width:100%;background:var(--input-bg);color:var(--input-color)}
+  button{cursor:pointer;border:none;font-weight:700}
+  .btn-primary{background:var(--accent);color:#000}
+  .btn-outline{background:transparent;border:2px solid var(--accent);color:var(--accent)}
+  .btn-danger{background:var(--accent-2);color:#000}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+  .actions{display:flex;gap:10px;align-items:center}
+  .hint{color:var(--muted);font-size:13px;margin-top:8px}
+  .table-wrap{overflow:auto;margin-top:12px;border-radius:8px;border:1px solid #222}
+  table{width:100%;border-collapse:collapse;background:transparent}
+  th,td{padding:10px;border-bottom:1px solid #2b2b2b;text-align:center;color:#eee}
+  th{background:#171717}
+  td input{width:100%;padding:6px;border-radius:4px;border:1px solid #333;background:#fff;color:#000}
+  .btn-row{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  canvas{width:100% !important;height:360px !important;background:#151515;border-radius:6px}
+  .cabecera{color:var(--muted);font-size:13px;margin-top:10px}
+  @media (max-width:900px){
+    .grid4{grid-template-columns:repeat(2,1fr)}
+    .grid5{grid-template-columns:repeat(2,1fr)}
+    canvas{height:320px !important}
+  }
+  @media (max-width:520px){
+    .grid4,.grid5{grid-template-columns:1fr}
+    .actions{flex-direction:column;align-items:stretch}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2>Registro de Temperaturas</h2>
+
+  <!-- META -->
+  <div class="card">
+    <div class="grid4">
+      <div>
+        <label for="horno">Horno</label>
+        <select id="horno">
+          <option>Horno 5</option><option>Horno 7-3</option><option>Horno 9-1</option>
+          <option>Horno 9-2</option><option>Horno Italiano</option><option>Horno 7-4</option>
+          <option>Horno 7-5</option><option>Horno 9-3</option><option>Horno 10</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="fecha">Fecha</label>
+        <input type="date" id="fecha">
+      </div>
+
+      <div>
+        <label for="turno">Turno</label>
+        <select id="turno">
+          <option value="T1">T1</option><option value="T2">T2</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="selActivos">Ciclos activos</label>
+        <select id="selActivos"><option value="">-- Ninguno --</option></select>
+      </div>
+    </div>
+
+    <div class="grid4" style="margin-top:12px">
+      <div>
+        <label for="horaInicio">Hora inicio</label>
+        <input type="time" id="horaInicio">
+      </div>
+      <div>
+        <label for="horaFin">Hora fin (auto +10h)</label>
+        <input type="time" id="horaFin">
+      </div>
+      <div>
+        <label for="operarioInicio">Operario (inicia)</label>
+        <input type="text" id="operarioInicio" placeholder="nombre">
+      </div>
+      <div class="actions">
+        <div style="width:100%">
+          <label style="visibility:hidden">actions</label>
+          <div style="display:flex;gap:8px">
+            <button id="btnNuevo" class="btn-primary">Iniciar ciclo</button>
+            <button id="btnRecargar" class="btn-outline">Recargar ciclos</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="hint">Si existe un ciclo activo (mismo Horno/Fecha/Turno) aparecerá en "Ciclos activos" — selecciónalo para continuar.</div>
+  </div>
+
+  <!-- LECTURAS -->
+  <div class="card">
+    <h3 style="color:var(--accent);margin:0 0 12px">Agregar lecturas por hora</h3>
+
+    <div class="table-wrap">
+      <table id="tabla">
+        <thead>
+          <tr><th>Hora</th><th>Zona 1</th><th>Zona 2</th><th>Zona 3</th><th>Zona 4</th><th>SetPoint</th><th>Quitar</th></tr>
+        </thead>
+        <tbody id="tbody">
+          <tr>
+            <td><input type="time" class="hora"></td>
+            <td><input type="number" class="zona1" step="0.1"></td>
+            <td><input type="number" class="zona2" step="0.1"></td>
+            <td><input type="number" class="zona3" step="0.1"></td>
+            <td><input type="number" class="zona4" step="0.1"></td>
+            <td><input type="number" class="setPoint" step="0.1"></td>
+            <td><button class="del" type="button" style="background:var(--accent);color:#000">✕</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="btn-row">
+      <button id="btnAgregarFila" class="btn-primary" type="button">Agregar lectura</button>
+      <button id="btnGuardar" class="btn-primary" type="button">Guardar lecturas</button>
+      <button id="btnFinalizar" class="btn-danger" type="button">Finalizar ciclo</button>
+    </div>
+
+    <div class="hint" style="margin-top:8px">Al finalizar se pedirá operario que finaliza y observaciones; el ciclo pasará a históricos y se limpiará la vista.</div>
+  </div>
+
+  <!-- GRAFICA -->
+  <div class="card">
+    <h3 style="color:var(--accent);margin:0 0 12px">Gráfica del ciclo seleccionado (en tiempo real)</h3>
+    <canvas id="chart"></canvas>
+    <div class="cabecera" id="cabecera"></div>
+  </div>
+</div>
+
+<script>
+/* ===== Firebase ===== */
+const firebaseConfig = {
+  apiKey: "AIzaSyAB4UlwaVJzc4U4VbmddLf4mejKAOvTufw",
+  authDomain: "hornosapp-60887.firebaseapp.com",
+  databaseURL: "https://hornosapp-60887-default-rtdb.firebaseio.com",
+  projectId: "hornosapp-60887",
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+/* ===== Helpers ===== */
+const $ = id => document.getElementById(id);
+const pad2 = n => String(n).padStart(2,'0');
+const hoyISO = () => new Date().toISOString().slice(0,10);
+function addHoursToHHMM(hhmm, plus=10){
+  if(!hhmm) return "";
+  const [h,m] = hhmm.split(':').map(Number);
+  const dt = new Date(); dt.setHours(h||0,m||0,0,0); dt.setHours(dt.getHours()+plus);
+  return pad2(dt.getHours())+':'+pad2(dt.getMinutes());
+}
+function horaAhoraHHMM(){
+  const d = new Date(); return pad2(d.getHours())+':'+pad2(d.getMinutes());
+}
+
+/* ===== State ===== */
+let currentCicloId = "";   // id en ciclosActivos
+let liveRef = null;
+
+/* ===== Init defaults ===== */
+$('fecha').value = hoyISO();
+$('horaInicio').value = horaAhoraHHMM();
+$('horaFin').value = addHoursToHHMM($('horaInicio').value,10);
+
+/* si cambian inputs que afectan filtro, recarga select */
+['horno','fecha','turno'].forEach(id => {
+  $(id).addEventListener('change', cargarActivosSelect);
+});
+
+/* ===== Table utilities ===== */
+function bindDeletes(){
+  document.querySelectorAll('#tbody .del').forEach(btn=>{
+    btn.onclick = ()=> btn.closest('tr').remove();
+  });
+}
+bindDeletes();
+
+$('btnAgregarFila').onclick = ()=>{
+  const now = horaAhoraHHMM();
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="time" class="hora" value="${now}"></td>
+    <td><input type="number" class="zona1" step="0.1"></td>
+    <td><input type="number" class="zona2" step="0.1"></td>
+    <td><input type="number" class="zona3" step="0.1"></td>
+    <td><input type="number" class="zona4" step="0.1"></td>
+    <td><input type="number" class="setPoint" step="0.1"></td>
+    <td><button class="del" type="button" style="background:var(--accent);color:#000">✕</button></td>
+  `;
+  $('tbody').appendChild(tr);
+  bindDeletes();
+};
+
+/* ===== Chart setup ===== */
+const chart = new Chart($('chart').getContext('2d'), {
+  type:'line',
+  data:{ labels: [], datasets:[
+    {label:'Zona 1', data:[], borderColor:'red', fill:false, tension:0.2},
+    {label:'Zona 2', data:[], borderColor:'green', fill:false, tension:0.2},
+    {label:'Zona 3', data:[], borderColor:'blue', fill:false, tension:0.2},
+    {label:'Zona 4', data:[], borderColor:'blue', fill:false, tension:0.2},
+    {label:'SetPoint', data:[], borderColor:'orange', borderDash:[6,4], fill:false, tension:0}
+  ]},
+  options:{responsive:true,maintainAspectRatio:false,animation:false}
+});
+
+/* ===== Load active cycles for dropdown (filtered) ===== */
+async function cargarActivosSelect(){
+  const horno = $('horno').value, fecha = $('fecha').value, turno = $('turno').value;
+  const snap = await db.ref('ciclosActivos').once('value');
+  const sel = $('selActivos');
+  sel.innerHTML = `<option value="">-- Ninguno --</option>`;
+  snap.forEach(ch=>{
+    const meta = ch.val().meta || {};
+    // show cycles that match selected Horno+Fecha+Turno for convenience
+    if(meta.horno === horno && meta.fecha === fecha && meta.turno === turno){
+      const opt = document.createElement('option');
+      opt.value = ch.key;
+      opt.textContent = `${meta.horno} • ${meta.fecha} • ${meta.turno} • ${meta.horaInicio || '--'}`;
+      sel.appendChild(opt);
+    }
+  });
+}
+
+/* wire recargar button */
+$('btnRecargar').addEventListener('click', cargarActivosSelect);
+
+/* auto load when page opens */
+cargarActivosSelect();
+
+/* ===== Attach / detach live listener for selected cycle ===== */
+function detachLive(){
+  if(liveRef){ liveRef.off(); liveRef = null; }
+  chart.data.labels = []; chart.data.datasets.forEach(ds=>ds.data=[]); chart.update();
+  $('cabecera').textContent = '';
+  currentCicloId = "";
+}
+
+function attachLive(cicloId){
+  detachLive();
+  if(!cicloId) return;
+  currentCicloId = cicloId;
+  // load meta
+  db.ref(`ciclosActivos/${cicloId}/meta`).once('value').then(s=>{
+    const meta = s.val() || {};
+    if(meta.horaInicio) $('horaInicio').value = meta.horaInicio;
+    if(meta.horaFin) $('horaFin').value = meta.horaFin;
+    if(meta.operarioInicio) $('operarioInicio').value = meta.operarioInicio;
+    $('cabecera').textContent = `Ciclo: ${meta.horno||''} | ${meta.fecha||''} | ${meta.turno||''} | inicio: ${meta.horaInicio||''} | fin: ${meta.horaFin||'Pendiente'} | operario inicio: ${meta.operarioInicio||''}`;
+  });
+
+  // live lecturas listener
+  liveRef = db.ref(`ciclosActivos/${cicloId}/lecturas`);
+ liveRef.on('value', snap=>{
+    // Convertir todas las lecturas en un arreglo ordenado por hora
+    const arr = [];
+    snap.forEach(ch => {
+      const val = ch.val() || {};
+      arr.push({
+        hora: val.hora || horaAhoraHHMM(),
+        zona1: parseFloat(val.zona1) || 0,
+        zona2: parseFloat(val.zona2) || 0,
+        zona3: parseFloat(val.zona3) || 0,
+        zona4: parseFloat(val.zona4) || 0,
+        setPoint: parseFloat(val.setPoint) || 0
+      });
+    });
+    arr.sort((a,b)=> (a.hora||'').localeCompare(b.hora||''));
+
+    // Actualizar la gráfica con TODAS las lecturas
+    chart.data.labels = arr.map(r=> r.hora);
+    chart.data.datasets[0].data = arr.map(r=> r.zona1);
+    chart.data.datasets[1].data = arr.map(r=> r.zona2);
+    chart.data.datasets[2].data = arr.map(r=> r.zona3);
+    chart.data.datasets[3].data = arr.map(r=> r.setPoint);
+    chart.update();
+
+
+    // populate table with existing lecturas (replace tbody)
+    const tbody = $('tbody');
+    tbody.innerHTML = '';
+    if(arr.length === 0){
+      // keep one empty row
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td><input type="time" class="hora" value="${horaAhoraHHMM()}"></td>
+        <td><input type="number" class="zona1" step="0.1"></td>
+        <td><input type="number" class="zona2" step="0.1"></td>
+        <td><input type="number" class="zona3" step="0.1"></td>
+        <td><input type="number" class="zona4" step="0.1"></td>
+        <td><input type="number" class="setPoint" step="0.1"></td>
+        <td><button class="del" type="button" style="background:var(--accent);color:#000">✕</button></td>`;
+      tbody.appendChild(tr);
+    } else {
+      arr.forEach(item=>{
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td><input type="time" class="hora" value="${item.hora||''}"></td>
+          <td><input type="number" class="zona1" step="0.1" value="${item.zona1||''}"></td>
+          <td><input type="number" class="zona2" step="0.1" value="${item.zona2||''}"></td>
+          <td><input type="number" class="zona3" step="0.1" value="${item.zona3||''}"></td>
+          <td><input type="number" class="zona4" step="0.1" value="${item.zona3||''}"></td>
+          <td><input type="number" class="setPoint" step="0.1" value="${item.setPoint||''}"></td>
+          <td><button class="del" type="button" style="background:var(--accent);color:#000">✕</button></td>`;
+        tbody.appendChild(tr);
+      });
+    }
+    bindDeletes();
+  });
+}
+
+/* when user selects an active cycle from dropdown */
+$('selActivos').addEventListener('change', async (e)=>{
+  const id = e.target.value;
+  if(!id){ detachLive(); return; }
+  attachLive(id);
+});
+
+/* ===== Start new cycle ===== */
+$('btnNuevo').addEventListener('click', async ()=>{
+  const horno = $('horno').value;
+  const fecha = $('fecha').value;
+  const turno = $('turno').value;
+  const horaInicio = $('horaInicio').value || horaAhoraHHMM();
+  const horaFin = $('horaFin').value || addHoursToHHMM(horaInicio,10);
+  const operarioInicio = $('operarioInicio').value || '';
+
+  if(!horno || !fecha || !turno){
+    alert('Completa Horno, Fecha y Turno.');
+    return;
+  }
+
+ // VALIDAR SI YA EXISTE UN CICLO ACTIVO CON MISMO HORNO, FECHA Y TURNO
+  const snapshot = await db.ref('ciclosActivos').once('value');
+  let cicloExistente = false;
+  snapshot.forEach(ch=>{
+    const meta = ch.val().meta || {};
+    if(meta.horno===horno && meta.fecha===fecha && meta.turno===turno){
+      cicloExistente = true;
+    }
+  });
+  if(cicloExistente){
+    alert('Ya existe un ciclo activo para este horno, fecha y turno. No puedes iniciar otro.');
+    return;
+  }
+ 
+  const meta = { horno, fecha, turno, horaInicio, horaFin, operarioInicio };
+  const newRef = await db.ref('ciclosActivos').push({ meta, lecturas: {} });
+  // refresh select and auto-select
+  await cargarActivosSelect();
+  $('selActivos').value = newRef.key;
+  attachLive(newRef.key);
+  alert('Ciclo iniciado.');
+});
+
+/* ===== Save readings into current cycle ===== */
+$('btnGuardar').addEventListener('click', async ()=>{
+  if(!currentCicloId){
+    alert('Primero inicia o selecciona un ciclo activo.');
+    return;
+  }
+  const rows = Array.from(document.querySelectorAll('#tbody tr'));
+  if(rows.length===0){ alert('No hay lecturas.'); return; }
+
+  const refLecturas = db.ref(`ciclosActivos/${currentCicloId}/lecturas`);
+  const snap = await refLecturas.once('value');
+  const existentes = {};
+  snap.forEach(ch => {
+    if (ch.val() && ch.val().hora) existentes[ch.val().hora] = ch.key;
+  });
+
+  const ops = [];
+  for(const tr of rows){
+    const hora = tr.querySelector('.hora').value;
+    if(!hora) continue;
+    const data = {
+      hora,
+      zona1: parseFloat(tr.querySelector('.zona1').value) || 0,
+      zona2: parseFloat(tr.querySelector('.zona2').value) || 0,
+      zona3: parseFloat(tr.querySelector('.zona3').value) || 0,
+      zona4: parseFloat(tr.querySelector('.zona4').value) || 0,
+      setPoint: parseFloat(tr.querySelector('.setPoint').value) || 0
+    };
+    if(existentes[hora]){
+      // actualizar si ya existe
+      ops.push(refLecturas.child(existentes[hora]).set(data));
+    } else {
+      // crear nueva
+      ops.push(refLecturas.push(data));
+    }
+  }
+
+  if(ops.length===0){ alert('No hay lecturas válidas.'); return; }
+  await Promise.all(ops);
+  alert('Lecturas guardadas/actualizadas correctamente.');
+});
+
+/* ===== Finalize cycle (move to historicos) ===== */
+$('btnFinalizar').addEventListener('click', async ()=>{
+  if(!currentCicloId){
+    alert('Selecciona o inicia primero un ciclo activo.');
+    return;
+  }
+  // confirm and gather final data
+  const horaFinPrompt = prompt('Hora fin del ciclo (HH:MM):', $('horaFin').value || horaAhoraHHMM());
+  if(horaFinPrompt === null) return;
+  const operarioFin = prompt('Operario que finaliza:', '');
+  if(operarioFin === null) return;
+  const observaciones = prompt('Observaciones (opcional):','') || '';
+
+  // read node
+  const snap = await db.ref(`ciclosActivos/${currentCicloId}`).once('value');
+  const node = snap.val();
+  if(!node){ alert('No se encontró el ciclo activo.'); return; }
+
+  // update meta
+  node.meta = node.meta || {};
+  node.meta.horaFin = horaFinPrompt;
+  node.meta.operarioFin = operarioFin;
+  node.meta.observaciones = observaciones;
+
+  // push to historicos
+  await db.ref('historicos').push(node);
+  // remove active
+  await db.ref(`ciclosActivos/${currentCicloId}`).remove();
+
+  // cleanup UI
+  detachLive();
+  // reset table to single empty row
+  $('tbody').innerHTML = `<tr>
+    <td><input type="time" class="hora" value="${horaAhoraHHMM()}"></td>
+    <td><input type="number" class="zona1" step="0.1"></td>
+    <td><input type="number" class="zona2" step="0.1"></td>
+    <td><input type="number" class="zona3" step="0.1"></td>
+    <td><input type="number" class="zona4" step="0.1"></td>
+    <td><input type="number" class="setPoint" step="0.1"></td>
+    <td><button class="del" type="button" style="background:var(--accent);color:#000">✕</button></td>
+  </tr>`;
+  bindDeletes();
+  // reset meta inputs except date
+  $('horaInicio').value = horaAhoraHHMM();
+  $('horaFin').value = addHoursToHHMM($('horaInicio').value,10);
+  $('operarioInicio').value = '';
+  await cargarActivosSelect();
+
+  alert('Ciclo finalizado y movido a históricos.');
+});
+
+/* ===== Auto-select single active cycle if found on load ===== */
+(async function autoSelectIfOne(){
+  await cargarActivosSelect();
+  const sel = $('selActivos');
+  if(sel.options.length===2 && sel.options[1].value){
+    sel.selectedIndex = 1;
+    sel.dispatchEvent(new Event('change'));
+  }
+})();
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js')
+  .then(() => console.log('Service Worker registrado'))
+  .catch(err => console.error('Error SW:', err));
+}
+
+
+</script>
+</body>
+</html>
